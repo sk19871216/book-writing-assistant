@@ -6,7 +6,6 @@ import os
 import sys
 import re
 import json
-import subprocess
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime
 
@@ -16,8 +15,9 @@ from storage import (
     init_db, create_conversation, get_conversation, list_conversations,
     append_entry, update_conversation_round, update_conversation_status,
     save_user_selection, get_latest_user_selection, has_agent_spoken,
-    get_latest_entry_by_agent
+    get_latest_entry_by_agent, get_workflow_state, set_workflow_state
 )
+from ai_client import get_ai_client
 
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -135,24 +135,13 @@ class WorkflowEngine:
         return '\n'.join(context_lines)
     
     def call_claude(self, prompt: str) -> str:
-        """Call Claude CLI to execute agent prompt."""
+        """Call Claude API to execute agent prompt."""
         try:
-            result = subprocess.run(
-                ['claude', '-p', '--permission-mode', 'acceptedEdits', '--no-session-persistence', prompt],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                timeout=300,
-                cwd=PROJECT_DIR
-            )
-            
-            if result.returncode != 0:
-                error_msg = result.stderr or "Unknown error"
-                return f"Error: {error_msg}"
-            
-            return result.stdout or ""
-        except subprocess.TimeoutExpired:
-            return "Error: Request timeout"
+            client = get_ai_client()
+            output = client.generate(prompt)
+            return output
+        except ValueError as e:
+            return f"Error: {str(e)}"
         except Exception as e:
             return f"Error: {str(e)}"
     
@@ -229,8 +218,7 @@ class WorkflowEngine:
         update_conversation_status(self.conv_id, verdict)
         
         self.broadcast('evaluation_complete', {
-            'verdict': verdict,
-            'content': output
+            'verdict': verdict
         })
         
         return verdict
@@ -298,7 +286,7 @@ class WorkflowEngine:
         return {'action': 'continue', 'message': '已收到反馈，将继续完善'}
     
     def run_workflow(self) -> Dict[str, Any]:
-        """Run the complete workflow."""
+        """Run the initial workflow - only Agent A generates simple directions."""
         init_db()
         
         self.broadcast('workflow_start', {
@@ -306,44 +294,78 @@ class WorkflowEngine:
             'topic': self.topic
         })
         
-        iteration = 0
-        max_iterations = 20
+        self.current_round = 1
+        update_conversation_round(self.conv_id, self.current_round)
+        set_workflow_state(self.conv_id, 'direction_selection')
         
-        while iteration < max_iterations:
-            iteration += 1
-            self.current_round += 1
-            update_conversation_round(self.conv_id, self.current_round)
-            
-            self.broadcast('iteration_start', {
-                'iteration': iteration,
-                'round': self.current_round
-            })
-            
-            self.run_agent('A')
-            
-            self.run_agent('B')
-            
-            self.broadcast('awaiting_user_input', {
-                'phase': 'direction_selection' if self.is_direction_selection_phase() else 'feedback'
-            })
-            
-            return {
-                'action': 'wait_for_user',
-                'iteration': iteration,
-                'round': self.current_round,
-                'phase': 'direction_selection' if self.is_direction_selection_phase() else 'feedback'
-            }
+        self.broadcast('iteration_start', {
+            'iteration': 1,
+            'round': self.current_round
+        })
         
-        return {'action': 'max_iterations_reached'}
+        self.run_agent('A')
+        
+        self.broadcast('awaiting_user_input', {
+            'phase': 'direction_selection'
+        })
+        
+        return {
+            'action': 'wait_for_user',
+            'iteration': 1,
+            'round': self.current_round,
+            'state': 'direction_selection'
+        }
     
     def continue_workflow(self, user_input: str) -> Dict[str, Any]:
-        """Continue workflow after user input."""
-        result = self.process_user_input(user_input)
+        """Continue workflow after user input based on current state."""
+        current_state = get_workflow_state(self.conv_id)
+
+        if current_state == 'direction_selection':
+            return self.handle_direction_selection(user_input)
+        elif current_state == 'detailed_ideas':
+            return self.handle_detailed_ideas(user_input)
+        elif current_state == 'feedback':
+            return self.handle_feedback(user_input)
+        elif current_state == 'feedback_after_review':
+            return self.handle_feedback_after_review(user_input)
+
+        return {'action': 'error', 'message': 'Unknown state'}
+    
+    def handle_direction_selection(self, user_input: str) -> Dict[str, Any]:
+        """Handle user input in direction selection phase."""
+        direction = self.parse_direction_from_input(user_input)
         
-        if result['action'] == 'wait':
-            return result
+        if not direction:
+            return {'action': 'wait', 'message': '请输入有效的方向选择（如：方向1、2）'}
         
-        if result['action'] == 'final_evaluation':
+        save_user_selection(self.conv_id, self.current_round, direction=direction, feedback=user_input)
+        
+        self.current_round += 1
+        update_conversation_round(self.conv_id, self.current_round)
+        
+        self.broadcast('iteration_start', {
+            'iteration': 1,
+            'round': self.current_round
+        })
+        
+        self.run_agent('A')
+        
+        set_workflow_state(self.conv_id, 'detailed_ideas')
+        
+        self.broadcast('awaiting_user_input', {
+            'phase': 'detailed_ideas'
+        })
+        
+        return {
+            'action': 'wait_for_user',
+            'iteration': 1,
+            'round': self.current_round,
+            'state': 'detailed_ideas'
+        }
+    
+    def handle_detailed_ideas(self, user_input: str) -> Dict[str, Any]:
+        """Handle user input after detailed ideas are generated."""
+        if self.is_user_satisfied(user_input):
             verdict = self.run_agent_c()
             if verdict == 'approved':
                 outline = self.generate_final_outline()
@@ -357,18 +379,186 @@ class WorkflowEngine:
                     'action': 'needs_work' if verdict == 'needs_work' else 'rejected',
                     'verdict': verdict
                 }
-        
-        if result['action'] == 'regenerate':
-            self.current_round = 0
-        
-        return self.run_workflow()
+
+        if self.is_review_request(user_input):
+            self.run_agent('B')
+
+            self.broadcast('awaiting_user_input', {
+                'phase': 'feedback_after_review'
+            })
+
+            return {
+                'action': 'wait_for_user',
+                'iteration': 1,
+                'round': self.current_round,
+                'state': 'feedback_after_review'
+            }
+
+        save_user_selection(self.conv_id, self.current_round, feedback=user_input)
+
+        self.current_round += 1
+        update_conversation_round(self.conv_id, self.current_round)
+
+        self.broadcast('iteration_start', {
+            'iteration': 1,
+            'round': self.current_round
+        })
+
+        self.run_agent('A')
+
+        self.broadcast('awaiting_user_input', {
+            'phase': 'detailed_ideas'
+        })
+
+        return {
+            'action': 'wait_for_user',
+            'iteration': 1,
+            'round': self.current_round,
+            'state': 'detailed_ideas'
+        }
+    
+    def is_review_request(self, user_input: str) -> bool:
+        """Check if user wants B to review."""
+        review_keywords = ['让B审核', 'B审核', '审核', '给B看', 'b审核', 'review']
+        user_input_lower = user_input.lower()
+        return any(keyword in user_input_lower for keyword in review_keywords)
+
+    def handle_regenerate(self) -> Dict[str, Any]:
+        """Handle regenerate request - restart from Agent A."""
+        self.current_round += 1
+        update_conversation_round(self.conv_id, self.current_round)
+        set_workflow_state(self.conv_id, 'direction_selection')
+
+        self.broadcast('iteration_start', {
+            'iteration': 1,
+            'round': self.current_round
+        })
+
+        self.run_agent('A')
+
+        self.broadcast('awaiting_user_input', {
+            'phase': 'direction_selection'
+        })
+
+        return {
+            'action': 'wait_for_user',
+            'iteration': 1,
+            'round': self.current_round,
+            'state': 'direction_selection'
+        }
+
+    def handle_feedback_after_review(self, user_input: str) -> Dict[str, Any]:
+        """Handle user input after B has reviewed."""
+        if self.is_user_satisfied(user_input):
+            verdict = self.run_agent_c()
+            if verdict == 'approved':
+                outline = self.generate_final_outline()
+                return {
+                    'action': 'complete',
+                    'verdict': verdict,
+                    'outline': outline
+                }
+            else:
+                return {
+                    'action': 'needs_work' if verdict == 'needs_work' else 'rejected',
+                    'verdict': verdict
+                }
+
+        if self.is_regenerate_request(user_input):
+            return self.handle_regenerate()
+
+        save_user_selection(self.conv_id, self.current_round, feedback=user_input)
+
+        self.current_round += 1
+        update_conversation_round(self.conv_id, self.current_round)
+
+        self.broadcast('iteration_start', {
+            'iteration': 1,
+            'round': self.current_round
+        })
+
+        self.run_agent('A')
+
+        self.broadcast('awaiting_user_input', {
+            'phase': 'feedback'
+        })
+
+        return {
+            'action': 'wait_for_user',
+            'iteration': 1,
+            'round': self.current_round,
+            'state': 'feedback'
+        }
+
+    def handle_feedback(self, user_input: str) -> Dict[str, Any]:
+        """Handle user input in feedback phase."""
+        if self.is_user_satisfied(user_input):
+            verdict = self.run_agent_c()
+            if verdict == 'approved':
+                outline = self.generate_final_outline()
+                return {
+                    'action': 'complete',
+                    'verdict': verdict,
+                    'outline': outline
+                }
+            else:
+                return {
+                    'action': 'needs_work' if verdict == 'needs_work' else 'rejected',
+                    'verdict': verdict
+                }
+
+        if self.is_review_request(user_input):
+            self.run_agent('B')
+
+            self.broadcast('awaiting_user_input', {
+                'phase': 'feedback_after_review'
+            })
+
+            return {
+                'action': 'wait_for_user',
+                'iteration': 1,
+                'round': self.current_round,
+                'state': 'feedback_after_review'
+            }
+
+        if self.is_regenerate_request(user_input):
+            return self.handle_regenerate()
+
+        save_user_selection(self.conv_id, self.current_round, feedback=user_input)
+
+        self.current_round += 1
+        update_conversation_round(self.conv_id, self.current_round)
+
+        self.broadcast('iteration_start', {
+            'iteration': 1,
+            'round': self.current_round
+        })
+
+        self.run_agent('A')
+
+        self.broadcast('awaiting_user_input', {
+            'phase': 'feedback'
+        })
+
+        return {
+            'action': 'wait_for_user',
+            'iteration': 1,
+            'round': self.current_round,
+            'state': 'feedback'
+        }
 
 
 def start_workflow(topic: str, ws_broadcaster: Optional[Callable] = None) -> Dict[str, Any]:
     """Start a new workflow with given topic."""
     init_db()
     conv_id = create_conversation(topic)
-    
+
+    engine = WorkflowEngine(conv_id, ws_broadcaster)
+    return engine.run_workflow()
+
+
+def resume_workflow(conv_id: int, ws_broadcaster: Optional[Callable] = None) -> Dict[str, Any]:
+    """Resume workflow on existing conversation."""
     engine = WorkflowEngine(conv_id, ws_broadcaster)
     return engine.run_workflow()
 

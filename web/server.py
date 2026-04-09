@@ -19,7 +19,7 @@ from src.storage import (
     init_db, create_conversation, get_conversation, list_conversations,
     append_entry, get_all_entries, save_user_selection, get_latest_user_selection
 )
-from src.workflow import start_workflow, continue_workflow
+from src.workflow import start_workflow, continue_workflow, resume_workflow
 
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -85,6 +85,17 @@ def api_get_conversation(conv_id: int):
     return jsonify(conv)
 
 
+@app.route('/api/conversations/<int:conv_id>', methods=['DELETE'])
+def api_delete_conversation(conv_id: int):
+    """Delete a conversation."""
+    from src.storage import delete_conversation
+    try:
+        delete_conversation(conv_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/conversations/<int:conv_id>/entries', methods=['GET'])
 def api_get_entries(conv_id: int):
     """Get all entries for a conversation."""
@@ -126,17 +137,18 @@ def api_save_selection(conv_id: int):
     return jsonify({'success': True})
 
 
-def run_workflow_async(conv_id: int, topic: str):
+def run_workflow_async(conv_id: int):
     """Run workflow in a separate thread."""
     broadcaster = workflow_broadcaster(conv_id)
     try:
-        result = start_workflow(topic, broadcaster)
-        
+        result = resume_workflow(conv_id, broadcaster)
+
         if result.get('action') == 'wait_for_user':
             broadcast_to_conv(conv_id, 'workflow_waiting', {
                 'conv_id': conv_id,
                 'round': result['round'],
-                'phase': result['phase']
+                'phase': result['phase'],
+                'state': result.get('state', 'direction_selection')
             })
     except Exception as e:
         broadcast_to_conv(conv_id, 'workflow_error', {
@@ -150,11 +162,11 @@ def api_start_workflow(conv_id: int):
     conv = get_conversation(conv_id)
     if not conv:
         return jsonify({'error': 'Conversation not found'}), 404
-    
-    thread = threading.Thread(target=run_workflow_async, args=(conv_id, conv['topic']))
+
+    thread = threading.Thread(target=run_workflow_async, args=(conv_id,))
     thread.daemon = True
     thread.start()
-    
+
     return jsonify({'status': 'started'})
 
 
@@ -248,30 +260,46 @@ def handle_send_message(data):
         return
     
     append_entry(conv_id, 'user', conv['round'], message)
-    
+
     broadcast_to_conv(conv_id, 'message_received', {
         'conv_id': conv_id,
         'agent': 'user',
         'content': message,
         'timestamp': datetime.now().isoformat()
     })
-    
-    def continue_callback(msg):
-        broadcast_to_conv(conv_id, 'workflow_event', msg)
-    
-    result = continue_workflow(conv_id, message, continue_callback)
-    
-    if result.get('action') == 'wait_for_user':
-        broadcast_to_conv(conv_id, 'workflow_waiting', {
-            'conv_id': conv_id,
-            'round': result['round'],
-            'phase': result['phase']
-        })
-    elif result.get('action') == 'complete':
-        broadcast_to_conv(conv_id, 'workflow_complete', {
-            'verdict': result.get('verdict'),
-            'outline': result.get('outline')
-        })
+
+    def continue_workflow_async():
+        def continue_callback(msg):
+            broadcast_to_conv(conv_id, 'workflow_event', msg)
+
+        try:
+            result = continue_workflow(conv_id, message, continue_callback)
+
+            if result.get('action') == 'wait_for_user':
+                broadcast_to_conv(conv_id, 'workflow_waiting', {
+                    'conv_id': conv_id,
+                    'round': result['round'],
+                    'phase': result.get('phase', result.get('state', 'feedback'))
+                })
+            elif result.get('action') == 'complete':
+                broadcast_to_conv(conv_id, 'workflow_complete', {
+                    'verdict': result.get('verdict'),
+                    'outline': result.get('outline')
+                })
+            elif result.get('action') == 'needs_work' or result.get('action') == 'rejected':
+                broadcast_to_conv(conv_id, 'workflow_waiting', {
+                    'conv_id': conv_id,
+                    'round': result.get('round', 1),
+                    'phase': 'feedback'
+                })
+        except Exception as e:
+            broadcast_to_conv(conv_id, 'workflow_error', {
+                'error': str(e)
+            })
+
+    thread = threading.Thread(target=continue_workflow_async)
+    thread.daemon = True
+    thread.start()
 
 
 if __name__ == '__main__':

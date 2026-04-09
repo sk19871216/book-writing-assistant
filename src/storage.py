@@ -32,6 +32,7 @@ def init_db() -> None:
             topic TEXT NOT NULL,
             round INTEGER DEFAULT 0,
             status TEXT DEFAULT 'in_progress',
+            workflow_state TEXT DEFAULT 'direction_selection',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -108,11 +109,14 @@ def get_conversation(conv_id: int) -> Optional[Dict[str, Any]]:
     
     conn.close()
     
+    workflow_state = conv_row['workflow_state'] if 'workflow_state' in conv_row.keys() else 'direction_selection'
+
     return {
         'id': conv_row['id'],
         'topic': conv_row['topic'],
         'round': conv_row['round'],
         'status': conv_row['status'],
+        'workflow_state': workflow_state,
         'created_at': conv_row['created_at'],
         'updated_at': conv_row['updated_at'],
         'entries': entries,
@@ -288,6 +292,34 @@ def get_all_entries(conv_id: int) -> List[Dict[str, Any]]:
     conn.close()
     
     return [dict(row) for row in rows]
+
+
+def get_workflow_state(conv_id: int) -> str:
+    """Get the current workflow state for a conversation."""
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT workflow_state FROM conversations WHERE id = ?', (conv_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row and 'workflow_state' in row.keys():
+        return row['workflow_state']
+    return 'direction_selection'
+
+
+def set_workflow_state(conv_id: int, state: str) -> None:
+    """Set the workflow state for a conversation."""
+    conn = get_db()
+    cursor = conn.cursor()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    cursor.execute(
+        'UPDATE conversations SET workflow_state = ?, updated_at = ? WHERE id = ?',
+        (state, now, conv_id)
+    )
+    conn.commit()
+    conn.close()
 
 
 if __name__ == '__main__':

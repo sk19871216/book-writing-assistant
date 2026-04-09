@@ -174,6 +174,39 @@
             font-family: 'Space Mono', monospace;
         }
 
+        .conv-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+        }
+
+        .conv-item .conv-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .delete-btn {
+            opacity: 0;
+            padding: 6px 10px;
+            background: rgba(220, 38, 38, 0.1);
+            color: #dc2626;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            margin-left: 8px;
+        }
+
+        .conv-item:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .delete-btn:hover {
+            background: rgba(220, 38, 38, 0.2);
+        }
+
         .status-badge {
             padding: 2px 8px;
             border-radius: 10px;
@@ -192,6 +225,8 @@
             flex-direction: column;
             background: var(--bg-primary);
             position: relative;
+            overflow: hidden;
+            height: 100vh;
         }
 
         .chat-header {
@@ -201,6 +236,7 @@
             align-items: center;
             justify-content: space-between;
             background: linear-gradient(to right, var(--bg-secondary), transparent);
+            flex-shrink: 0;
         }
 
         .chat-topic {
@@ -245,11 +281,13 @@
 
         .chat-messages {
             flex: 1;
-            overflow-y: auto;
+            overflow-y: auto !important;
+            overflow-x: hidden;
             padding: 32px;
             display: flex;
             flex-direction: column;
             gap: 24px;
+            min-height: 0;
         }
 
         .chat-messages::-webkit-scrollbar {
@@ -338,6 +376,21 @@
             border: 1px solid var(--border-color);
         }
 
+        .message.agent-A .message-bubble {
+            background: rgba(59, 130, 246, 0.15) !important;
+            border-color: rgba(59, 130, 246, 0.4) !important;
+        }
+
+        .message.agent-B .message-bubble {
+            background: rgba(251, 191, 36, 0.15) !important;
+            border-color: rgba(251, 191, 36, 0.4) !important;
+        }
+
+        .message.agent-C .message-bubble {
+            background: rgba(167, 139, 250, 0.15) !important;
+            border-color: rgba(167, 139, 250, 0.4) !important;
+        }
+
         .message.user .message-bubble {
             background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05));
             border-color: rgba(16, 185, 129, 0.3);
@@ -393,6 +446,7 @@
             padding: 24px 32px;
             border-top: 1px solid var(--border-color);
             background: var(--bg-secondary);
+            flex-shrink: 0;
         }
 
         .input-container {
@@ -449,6 +503,26 @@
         .send-btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+
+        .cancel-btn {
+            padding: 16px 20px;
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            color: white;
+            border: none;
+            border-radius: 16px;
+            font-family: 'Space Mono', monospace;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cancel-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(220, 38, 38, 0.3);
         }
 
         /* Waiting State */
@@ -531,34 +605,40 @@
         /* Phase Banner */
         .phase-banner {
             padding: 16px 24px;
-            background: var(--bg-card);
-            border-bottom: 1px solid var(--border-color);
+            background: #2a2a3d !important;
+            border-bottom: 2px solid #4a4a6a;
             display: flex;
             align-items: center;
             gap: 12px;
         }
 
         .phase-banner.direction-selection {
-            background: linear-gradient(90deg, rgba(255, 107, 53, 0.1), transparent);
-            border-color: rgba(255, 107, 53, 0.3);
+            background: linear-gradient(90deg, rgba(255, 107, 53, 0.25), #2a2a3d) !important;
+            border-bottom-color: rgba(255, 107, 53, 0.6);
         }
 
         .phase-banner.feedback {
-            background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), transparent);
-            border-color: rgba(59, 130, 246, 0.3);
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.25), #2a2a3d) !important;
+            border-bottom-color: rgba(59, 130, 246, 0.6);
         }
 
-        .phase-icon {
-            font-size: 20px;
+        .phase-banner.feedback_after_review {
+            background: linear-gradient(90deg, rgba(34, 197, 94, 0.25), #2a2a3d) !important;
+            border-bottom-color: rgba(34, 197, 94, 0.6);
         }
 
         .phase-text {
-            font-size: 13px;
-            color: var(--text-secondary);
+            font-size: 14px;
+            color: #ffffff !important;
+            font-weight: 500;
         }
 
         .phase-text strong {
-            color: var(--text-primary);
+            color: #ffd700 !important;
+        }
+
+        .phase-icon {
+            font-size: 24px;
         }
 
         /* Outline Display */
@@ -672,6 +752,9 @@
                     <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>
                         <span>发送</span>
                     </button>
+                    <button class="cancel-btn" id="cancelBtn" onclick="cancelWorkflow()" style="display: none;">
+                        <span>中断</span>
+                    </button>
                 </div>
             </div>
         </main>
@@ -721,15 +804,39 @@
         function renderConversationList(conversations) {
             const list = document.getElementById('conversationList');
             list.innerHTML = conversations.map(conv => `
-                <div class="conv-item ${conv.id === currentConvId ? 'active' : ''}" 
-                     onclick="loadConversation(${conv.id})">
-                    <div class="topic">${escapeHtml(conv.topic)}</div>
-                    <div class="meta">
-                        <span>${formatDate(conv.updated_at || conv.created_at)}</span>
-                        <span class="status-badge status-${conv.status}">${getStatusText(conv.status)}</span>
+                <div class="conv-item ${conv.id === currentConvId ? 'active' : ''}"
+                     data-id="${conv.id}">
+                    <div class="conv-content" onclick="loadConversation(${conv.id})">
+                        <div class="topic">${escapeHtml(conv.topic)}</div>
+                        <div class="meta">
+                            <span>${formatDate(conv.updated_at || conv.created_at)}</span>
+                            <span class="status-badge status-${conv.status}">${getStatusText(conv.status)}</span>
+                        </div>
                     </div>
+                    <button class="delete-btn" onclick="deleteConversation(${conv.id}, event)" title="删除会话">✕</button>
                 </div>
             `).join('');
+        }
+
+        async function deleteConversation(convId, event) {
+            event.stopPropagation();
+            if (!confirm('确定要删除这个会话吗？')) return;
+
+            try {
+                await fetch(`/api/conversations/${convId}`, { method: 'DELETE' });
+                loadConversations();
+                if (currentConvId === convId) {
+                    currentConvId = null;
+                    document.getElementById('chatTopic').textContent = '写作助手';
+                    document.getElementById('roundInfo').textContent = '';
+                    document.getElementById('chatMessages').innerHTML = '';
+                    const emptyStateEl = document.getElementById('emptyState');
+                    if (emptyStateEl) emptyStateEl.style.display = 'flex';
+                }
+            } catch (e) {
+                console.error('Failed to delete conversation:', e);
+                showToast('删除失败');
+            }
         }
 
         function getStatusText(status) {
@@ -766,23 +873,31 @@
         async function loadConversation(convId) {
             currentConvId = convId;
             socket.emit('join_conversation', { conv_id: convId });
-            
+
+            hidePhaseBanner();
+            hideCancelButton();
+            hideWaiting();
+
+            const container = document.getElementById('chatMessages');
+            container.innerHTML = '';
+
             try {
                 const res = await fetch(`/api/conversations/${convId}`);
                 const conv = await res.json();
-                
+
                 document.getElementById('chatTopic').textContent = conv.topic;
                 document.getElementById('roundInfo').textContent = `轮次: ${conv.round}`;
                 currentRound = conv.round;
-                
+
                 renderMessages(conv.entries || []);
                 loadConversations();
                 
                 document.getElementById('messageInput').disabled = false;
                 document.getElementById('sendBtn').disabled = false;
                 document.getElementById('messageInput').focus();
-                
-                document.getElementById('emptyState').style.display = 'none';
+
+                const emptyStateEl = document.getElementById('emptyState');
+                if (emptyStateEl) emptyStateEl.style.display = 'none';
             } catch (e) {
                 console.error('Failed to load conversation:', e);
             }
@@ -791,26 +906,25 @@
         function renderMessages(entries) {
             const container = document.getElementById('chatMessages');
             const emptyState = document.getElementById('emptyState');
-            
-            if (entries.length === 0) {
-                emptyState.style.display = 'flex';
+
+            if (!entries || entries.length === 0) {
+                if (emptyState) {
+                    emptyState.style.display = 'flex';
+                }
                 return;
             }
-            
-            emptyState.style.display = 'none';
-            
-            const existingMessages = container.querySelectorAll('.message');
-            const existingCount = existingMessages.length;
-            
-            entries.forEach((entry, idx) => {
-                if (idx < existingCount) return;
-                
+
+            if (emptyState) {
+                emptyState.style.display = 'none';
+            }
+
+            entries.forEach((entry) => {
                 const time = formatTime(entry.timestamp);
                 const icon = AGENT_ICONS[entry.agent] || '?';
                 const name = AGENT_NAMES[entry.agent] || entry.agent;
-                
+
                 const msgDiv = document.createElement('div');
-                msgDiv.className = `message ${entry.agent}`;
+                msgDiv.className = `message agent-${entry.agent}`;
                 msgDiv.innerHTML = `
                     <div class="message-avatar">${icon}</div>
                     <div class="message-content">
@@ -823,21 +937,25 @@
                 `;
                 container.appendChild(msgDiv);
             });
-            
-            container.scrollTop = container.scrollHeight;
+
+            requestAnimationFrame(() => {
+                container.scrollTop = container.scrollHeight;
+            });
         }
 
         function addMessage(agent, content, timestamp) {
             const container = document.getElementById('chatMessages');
             const emptyState = document.getElementById('emptyState');
-            emptyState.style.display = 'none';
-            
+            if (emptyState) {
+                emptyState.style.display = 'none';
+            }
+
             const time = formatTime(timestamp);
             const icon = AGENT_ICONS[agent] || '?';
             const name = AGENT_NAMES[agent] || agent;
-            
+
             const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${agent}`;
+            msgDiv.className = `message agent-${agent}`;
             msgDiv.innerHTML = `
                 <div class="message-avatar">${icon}</div>
                 <div class="message-content">
@@ -849,7 +967,10 @@
                 </div>
             `;
             container.appendChild(msgDiv);
-            container.scrollTop = container.scrollHeight;
+
+            requestAnimationFrame(() => {
+                container.scrollTop = container.scrollHeight;
+            });
         }
 
         function formatContent(content) {
@@ -860,14 +981,35 @@
                 .replace(/`(.*?)`/g, '<code>$1</code>');
         }
 
+        function showCancelButton() {
+            const btn = document.getElementById('cancelBtn');
+            if (btn) btn.style.display = 'flex';
+        }
+
+        function hideCancelButton() {
+            const btn = document.getElementById('cancelBtn');
+            if (btn) btn.style.display = 'none';
+        }
+
+        function cancelWorkflow() {
+            if (!confirm('确定要中断当前工作流吗？')) return;
+            hideCancelButton();
+            hideWaiting();
+            hidePhaseBanner();
+            disableInput();
+            showToast('工作流已中断');
+        }
+
         async function sendMessage() {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
-            
+
             if (!message || !currentConvId) return;
-            
+
             input.value = '';
-            
+
+            addMessage('user', message, new Date().toISOString());
+
             socket.emit('send_message', {
                 conv_id: currentConvId,
                 message: message
@@ -894,36 +1036,42 @@
                 const { agent, content, timestamp } = data.data;
                 addMessage(agent, content, timestamp);
                 setAgentActive(agent, false);
+                hideWaiting();
             }
             
             if (type === 'awaiting_user_input') {
                 const { phase } = data.data;
+                const state = data.data.state || phase || 'direction_selection';
                 isWaitingForUser = true;
-                showPhaseBanner(phase);
+                showPhaseBanner(state);
                 hideWaiting();
                 enableInput();
+                showCancelButton();
             }
-            
+
             if (type === 'workflow_waiting') {
-                const { round, phase } = data;
+                const { round } = data;
+                const phase = data.phase || data.state || 'direction_selection';
                 currentRound = round;
                 document.getElementById('roundInfo').textContent = `轮次: ${round}`;
                 isWaitingForUser = true;
                 showPhaseBanner(phase);
                 hideWaiting();
                 enableInput();
+                showCancelButton();
             }
-            
+
             if (type === 'workflow_complete') {
                 const { verdict, outline } = data;
+                hideCancelButton();
+                hidePhaseBanner();
                 showOutline(outline);
                 hideWaiting();
                 disableInput();
             }
             
             if (type === 'evaluation_complete') {
-                const { verdict, content } = data.data;
-                addMessage('C', content, new Date().toISOString());
+                const { verdict } = data.data;
                 if (verdict !== 'approved') {
                     showToast(`评估结果: ${verdict === 'needs_work' ? '需要改进' : '未通过'}`);
                 }
@@ -931,9 +1079,8 @@
         });
 
         socket.on('message_received', (data) => {
-            if (data.agent === 'user') {
-                addMessage('user', data.content, data.timestamp);
-            }
+            // User messages are added directly in sendMessage()
+            // Server broadcasts are handled via socket
         });
 
         socket.on('workflow_error', (data) => {
@@ -954,35 +1101,47 @@
 
         function showWaiting(text) {
             const indicator = document.getElementById('waitingIndicator');
-            document.getElementById('waitingText').textContent = text || 'Agent 思考中...';
-            indicator.classList.add('active');
+            const waitText = document.getElementById('waitingText');
+            if (waitText) waitText.textContent = text || 'Agent 思考中...';
+            if (indicator) indicator.classList.add('active');
             disableInput();
         }
 
         function hideWaiting() {
-            document.getElementById('waitingIndicator').classList.remove('active');
+            const indicator = document.getElementById('waitingIndicator');
+            if (indicator) indicator.classList.remove('active');
         }
 
         function showPhaseBanner(phase) {
             const banner = document.getElementById('phaseBanner');
             const icon = document.getElementById('phaseIcon');
             const text = document.getElementById('phaseText');
-            
+
             banner.className = 'phase-banner ' + phase;
-            
+
             if (phase === 'direction_selection') {
                 icon.textContent = '🎯';
-                text.innerHTML = '<strong>请选择创意方向</strong>：输入格式如「方向1」或「方向1、2」';
+                text.innerHTML = '<strong>请选择感兴趣的方向</strong>。示例：单选【方向2】、多选【方向2、3】';
+            } else if (phase === 'detailed_ideas') {
+                icon.textContent = '📝';
+                text.innerHTML = '<strong>详细方案已生成</strong>：输入「让B审核」让审核者把关 / 输入修改意见继续调整 / 输入「满意」交给分析师';
+            } else if (phase === 'feedback') {
+                icon.textContent = '💭';
+                text.innerHTML = '<strong>请选择</strong>：输入「让B审核」让审核者把关 / 输入修改意见继续调整 / 输入「满意」交给分析师';
+            } else if (phase === 'feedback_after_review') {
+                icon.textContent = '✅';
+                text.innerHTML = '<strong>B 已审核完毕</strong>：输入「确认」按B的改 / 输入反馈综合B与你的意见再改 / 输入「满意」交给分析师';
             } else {
                 icon.textContent = '💭';
-                text.innerHTML = '<strong>请选择</strong>：「满意」确认 / 输入修改意见 / 「重新生成」重来';
+                text.innerHTML = '<strong>请选择</strong>：输入「让B审核」让审核者把关 / 输入修改意见 / 输入「满意」确认';
             }
-            
+
             banner.style.display = 'flex';
         }
 
         function hidePhaseBanner() {
-            document.getElementById('phaseBanner').style.display = 'none';
+            const banner = document.getElementById('phaseBanner');
+            if (banner) banner.style.display = 'none';
         }
 
         function enableInput() {
