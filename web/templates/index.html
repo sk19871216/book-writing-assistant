@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>写作助手 - 多 Agent 协作系统</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0d0d0d;
+            --bg-secondary: #141414;
+            --bg-tertiary: #1a1a1a;
+            --bg-card: #1f1f1f;
+            --text-primary: #fafafa;
+            --text-secondary: #a0a0a0;
+            --text-muted: #666666;
+            --accent-warm: #ff6b35;
+            --accent-cool: #00d4aa;
+            --accent-agent-a: #3b82f6;
+            --accent-agent-b: #f59e0b;
+            --accent-agent-c: #8b5cf6;
+            --accent-user: #10b981;
+            --border-color: #2a2a2a;
+            --shadow-glow: 0 0 40px rgba(255, 107, 53, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Serif SC', serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .app-container {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .sidebar::after {
+            content: '';
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: linear-gradient(to bottom, transparent, var(--accent-warm), transparent);
+            opacity: 0.5;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logo {
+            font-family: 'Space Mono', monospace;
+            font-size: 14px;
+            letter-spacing: 2px;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--accent-warm), var(--accent-cool));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+
+        .new-chat-btn {
+            width: 100%;
+            padding: 14px 20px;
+            background: linear-gradient(135deg, var(--accent-warm), #ff8c5a);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-family: 'Space Mono', monospace;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .new-chat-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(255, 107, 53, 0.3);
+        }
+
+        .conversation-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .conversation-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .conversation-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .conversation-list::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 2px;
+        }
+
+        .conv-item {
+            padding: 16px;
+            margin-bottom: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+
+        .conv-item:hover {
+            background: var(--bg-card);
+            border-color: var(--border-color);
+        }
+
+        .conv-item.active {
+            background: var(--bg-card);
+            border-color: var(--accent-warm);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .conv-item .topic {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .conv-item .meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: 'Space Mono', monospace;
+        }
+
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-in_progress { background: rgba(245, 158, 11, 0.2); color: var(--accent-agent-b); }
+        .status-approved { background: rgba(16, 185, 129, 0.2); color: var(--accent-user); }
+        .status-rejected { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+        /* Main Chat Area */
+        .main-chat {
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-primary);
+            position: relative;
+        }
+
+        .chat-header {
+            padding: 20px 32px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(to right, var(--bg-secondary), transparent);
+        }
+
+        .chat-topic {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .chat-status {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .round-info {
+            font-family: 'Space Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 6px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 20px;
+        }
+
+        .agent-indicators {
+            display: flex;
+            gap: 8px;
+        }
+
+        .agent-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+
+        .agent-dot.agent-a { background: var(--accent-agent-a); }
+        .agent-dot.agent-b { background: var(--accent-agent-b); }
+        .agent-dot.agent-c { background: var(--accent-agent-c); }
+        .agent-dot.active {
+            transform: scale(1.3);
+            box-shadow: 0 0 12px currentColor;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        .message {
+            display: flex;
+            gap: 16px;
+            animation: messageIn 0.4s ease-out;
+        }
+
+        @keyframes messageIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            flex-shrink: 0;
+            font-family: 'Space Mono', monospace;
+        }
+
+        .message.agent-A .message-avatar { background: linear-gradient(135deg, var(--accent-agent-a), #60a5fa); }
+        .message.agent-B .message-avatar { background: linear-gradient(135deg, var(--accent-agent-b), #fbbf24); }
+        .message.agent-C .message-avatar { background: linear-gradient(135deg, var(--accent-agent-c), #a78bfa); }
+        .message.user .message-avatar { background: linear-gradient(135deg, var(--accent-user), #34d399); }
+
+        .message-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .message-name {
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .message.agent-A .message-name { color: var(--accent-agent-a); }
+        .message.agent-B .message-name { color: var(--accent-agent-b); }
+        .message.agent-C .message-name { color: var(--accent-agent-c); }
+        .message.user .message-name { color: var(--accent-user); }
+
+        .message-time {
+            font-family: 'Space Mono', monospace;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .message-bubble {
+            background: var(--bg-card);
+            padding: 20px 24px;
+            border-radius: 16px;
+            border-top-left-radius: 4px;
+            line-height: 1.7;
+            font-size: 14px;
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05));
+            border-color: rgba(16, 185, 129, 0.3);
+            border-top-left-radius: 16px;
+            border-top-right-radius: 4px;
+        }
+
+        .message-bubble p {
+            margin-bottom: 12px;
+        }
+
+        .message-bubble p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-bubble strong {
+            color: var(--accent-warm);
+        }
+
+        .message-bubble h1, .message-bubble h2, .message-bubble h3 {
+            color: var(--text-primary);
+            margin: 16px 0 8px 0;
+            font-weight: 600;
+        }
+
+        .message-bubble ul, .message-bubble ol {
+            margin: 12px 0;
+            padding-left: 24px;
+        }
+
+        .message-bubble li {
+            margin-bottom: 6px;
+        }
+
+        .message-bubble code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Space Mono', monospace;
+            font-size: 13px;
+        }
+
+        .message-bubble pre {
+            background: var(--bg-tertiary);
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 12px 0;
+        }
+
+        /* Input Area */
+        .input-area {
+            padding: 24px 32px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+
+        .input-container {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 16px 20px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            color: var(--text-primary);
+            font-family: 'Noto Serif SC', serif;
+            font-size: 14px;
+            resize: none;
+            min-height: 56px;
+            max-height: 200px;
+            transition: all 0.2s ease;
+        }
+
+        .message-input:focus {
+            outline: none;
+            border-color: var(--accent-warm);
+            box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
+        }
+
+        .message-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .send-btn {
+            padding: 16px 28px;
+            background: linear-gradient(135deg, var(--accent-warm), #ff8c5a);
+            color: white;
+            border: none;
+            border-radius: 16px;
+            font-family: 'Space Mono', monospace;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .send-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(255, 107, 53, 0.3);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Waiting State */
+        .waiting-indicator {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 24px;
+            background: var(--bg-card);
+            border-radius: 12px;
+            margin-bottom: 16px;
+            border: 1px solid var(--border-color);
+        }
+
+        .waiting-indicator.active {
+            display: flex;
+        }
+
+        .waiting-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .waiting-dots span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-warm);
+            animation: dotPulse 1.4s ease-in-out infinite;
+        }
+
+        .waiting-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .waiting-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes dotPulse {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        .waiting-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* Empty State */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 48px;
+        }
+
+        .empty-icon {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--accent-warm), var(--accent-cool));
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 36px;
+            margin-bottom: 24px;
+        }
+
+        .empty-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .empty-desc {
+            color: var(--text-secondary);
+            font-size: 14px;
+            max-width: 360px;
+        }
+
+        /* Phase Banner */
+        .phase-banner {
+            padding: 16px 24px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .phase-banner.direction-selection {
+            background: linear-gradient(90deg, rgba(255, 107, 53, 0.1), transparent);
+            border-color: rgba(255, 107, 53, 0.3);
+        }
+
+        .phase-banner.feedback {
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), transparent);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+
+        .phase-icon {
+            font-size: 20px;
+        }
+
+        .phase-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .phase-text strong {
+            color: var(--text-primary);
+        }
+
+        /* Outline Display */
+        .outline-container {
+            background: var(--bg-card);
+            border: 1px solid var(--accent-cool);
+            border-radius: 16px;
+            padding: 32px;
+            margin-top: 24px;
+            box-shadow: 0 0 40px rgba(0, 212, 170, 0.1);
+        }
+
+        .outline-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent-cool);
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .outline-content {
+            line-height: 1.8;
+            font-size: 14px;
+        }
+
+        .outline-content h1, .outline-content h2, .outline-content h3 {
+            color: var(--text-primary);
+            margin: 20px 0 10px 0;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            padding: 16px 28px;
+            background: var(--bg-card);
+            border: 1px solid var(--accent-warm);
+            border-radius: 12px;
+            font-size: 14px;
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">✍️</div>
+                    <span>写作助手</span>
+                </div>
+                <button class="new-chat-btn" onclick="createNewConversation()">
+                    <span>+</span> 新建对话
+                </button>
+            </div>
+            <div class="conversation-list" id="conversationList"></div>
+        </aside>
+
+        <main class="main-chat">
+            <header class="chat-header">
+                <div class="chat-topic" id="chatTopic">选择或创建对话</div>
+                <div class="chat-status">
+                    <div class="round-info" id="roundInfo">轮次: 0</div>
+                    <div class="agent-indicators">
+                        <div class="agent-dot agent-a" id="dotA"></div>
+                        <div class="agent-dot agent-b" id="dotB"></div>
+                        <div class="agent-dot agent-c" id="dotC"></div>
+                    </div>
+                </div>
+            </header>
+
+            <div class="phase-banner" id="phaseBanner" style="display: none;">
+                <span class="phase-icon" id="phaseIcon">⏳</span>
+                <span class="phase-text" id="phaseText">等待中...</span>
+            </div>
+
+            <div class="chat-messages" id="chatMessages">
+                <div class="empty-state" id="emptyState">
+                    <div class="empty-icon">📚</div>
+                    <h2 class="empty-title">欢迎使用写作助手</h2>
+                    <p class="empty-desc">点击左侧「新建对话」开始，或选择一个已有的对话继续创作</p>
+                </div>
+            </div>
+
+            <div class="input-area">
+                <div class="waiting-indicator" id="waitingIndicator">
+                    <div class="waiting-dots">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <span class="waiting-text" id="waitingText">Agent 思考中...</span>
+                </div>
+                <div class="input-container">
+                    <textarea 
+                        class="message-input" 
+                        id="messageInput" 
+                        placeholder="输入你的想法或选择..."
+                        rows="1"
+                        disabled
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()" disabled>
+                        <span>发送</span>
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const socket = io();
+        let currentConvId = null;
+        let currentRound = 0;
+        let isWaitingForUser = false;
+
+        const AGENT_NAMES = {
+            'A': '💡 头脑风暴',
+            'B': '🔍 逻辑审核',
+            'C': '📖 爆款分析',
+            'user': '👤 你'
+        };
+
+        const AGENT_ICONS = {
+            'A': 'A',
+            'B': 'B',
+            'C': 'C',
+            'user': 'U'
+        };
+
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            loadConversations();
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+        });
+
+        async function loadConversations() {
+            try {
+                const res = await fetch('/api/conversations');
+                const conversations = await res.json();
+                renderConversationList(conversations);
+            } catch (e) {
+                console.error('Failed to load conversations:', e);
+            }
+        }
+
+        function renderConversationList(conversations) {
+            const list = document.getElementById('conversationList');
+            list.innerHTML = conversations.map(conv => `
+                <div class="conv-item ${conv.id === currentConvId ? 'active' : ''}" 
+                     onclick="loadConversation(${conv.id})">
+                    <div class="topic">${escapeHtml(conv.topic)}</div>
+                    <div class="meta">
+                        <span>${formatDate(conv.updated_at || conv.created_at)}</span>
+                        <span class="status-badge status-${conv.status}">${getStatusText(conv.status)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getStatusText(status) {
+            const map = {
+                'in_progress': '进行中',
+                'approved': '已完成',
+                'rejected': '未通过'
+            };
+            return map[status] || status;
+        }
+
+        async function createNewConversation() {
+            const topic = prompt('请输入你的故事主题或想法：');
+            if (!topic) return;
+
+            try {
+                const res = await fetch('/api/conversations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ topic })
+                });
+                const data = await res.json();
+                
+                loadConversations();
+                loadConversation(data.id);
+                
+                fetch(`/api/conversations/${data.id}/start`, { method: 'POST' });
+            } catch (e) {
+                console.error('Failed to create conversation:', e);
+                showToast('创建失败');
+            }
+        }
+
+        async function loadConversation(convId) {
+            currentConvId = convId;
+            socket.emit('join_conversation', { conv_id: convId });
+            
+            try {
+                const res = await fetch(`/api/conversations/${convId}`);
+                const conv = await res.json();
+                
+                document.getElementById('chatTopic').textContent = conv.topic;
+                document.getElementById('roundInfo').textContent = `轮次: ${conv.round}`;
+                currentRound = conv.round;
+                
+                renderMessages(conv.entries || []);
+                loadConversations();
+                
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                document.getElementById('messageInput').focus();
+                
+                document.getElementById('emptyState').style.display = 'none';
+            } catch (e) {
+                console.error('Failed to load conversation:', e);
+            }
+        }
+
+        function renderMessages(entries) {
+            const container = document.getElementById('chatMessages');
+            const emptyState = document.getElementById('emptyState');
+            
+            if (entries.length === 0) {
+                emptyState.style.display = 'flex';
+                return;
+            }
+            
+            emptyState.style.display = 'none';
+            
+            const existingMessages = container.querySelectorAll('.message');
+            const existingCount = existingMessages.length;
+            
+            entries.forEach((entry, idx) => {
+                if (idx < existingCount) return;
+                
+                const time = formatTime(entry.timestamp);
+                const icon = AGENT_ICONS[entry.agent] || '?';
+                const name = AGENT_NAMES[entry.agent] || entry.agent;
+                
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `message ${entry.agent}`;
+                msgDiv.innerHTML = `
+                    <div class="message-avatar">${icon}</div>
+                    <div class="message-content">
+                        <div class="message-header">
+                            <span class="message-name">${name}</span>
+                            <span class="message-time">${time}</span>
+                        </div>
+                        <div class="message-bubble">${formatContent(entry.content || '')}</div>
+                    </div>
+                `;
+                container.appendChild(msgDiv);
+            });
+            
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addMessage(agent, content, timestamp) {
+            const container = document.getElementById('chatMessages');
+            const emptyState = document.getElementById('emptyState');
+            emptyState.style.display = 'none';
+            
+            const time = formatTime(timestamp);
+            const icon = AGENT_ICONS[agent] || '?';
+            const name = AGENT_NAMES[agent] || agent;
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${agent}`;
+            msgDiv.innerHTML = `
+                <div class="message-avatar">${icon}</div>
+                <div class="message-content">
+                    <div class="message-header">
+                        <span class="message-name">${name}</span>
+                        <span class="message-time">${time}</span>
+                    </div>
+                    <div class="message-bubble">${formatContent(content)}</div>
+                </div>
+            `;
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function formatContent(content) {
+            if (!content) return '';
+            return content
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/`(.*?)`/g, '<code>$1</code>');
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message || !currentConvId) return;
+            
+            input.value = '';
+            
+            socket.emit('send_message', {
+                conv_id: currentConvId,
+                message: message
+            });
+        }
+
+        document.getElementById('messageInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        socket.on('workflow_event', (data) => {
+            const { type } = data;
+            
+            if (type === 'agent_start') {
+                const { agent } = data.data;
+                setAgentActive(agent, true);
+                showWaiting(`${AGENT_NAMES[agent]} 思考中...`);
+            }
+            
+            if (type === 'agent_complete') {
+                const { agent, content, timestamp } = data.data;
+                addMessage(agent, content, timestamp);
+                setAgentActive(agent, false);
+            }
+            
+            if (type === 'awaiting_user_input') {
+                const { phase } = data.data;
+                isWaitingForUser = true;
+                showPhaseBanner(phase);
+                hideWaiting();
+                enableInput();
+            }
+            
+            if (type === 'workflow_waiting') {
+                const { round, phase } = data;
+                currentRound = round;
+                document.getElementById('roundInfo').textContent = `轮次: ${round}`;
+                isWaitingForUser = true;
+                showPhaseBanner(phase);
+                hideWaiting();
+                enableInput();
+            }
+            
+            if (type === 'workflow_complete') {
+                const { verdict, outline } = data;
+                showOutline(outline);
+                hideWaiting();
+                disableInput();
+            }
+            
+            if (type === 'evaluation_complete') {
+                const { verdict, content } = data.data;
+                addMessage('C', content, new Date().toISOString());
+                if (verdict !== 'approved') {
+                    showToast(`评估结果: ${verdict === 'needs_work' ? '需要改进' : '未通过'}`);
+                }
+            }
+        });
+
+        socket.on('message_received', (data) => {
+            if (data.agent === 'user') {
+                addMessage('user', data.content, data.timestamp);
+            }
+        });
+
+        socket.on('workflow_error', (data) => {
+            showToast('发生错误: ' + data.error);
+            hideWaiting();
+        });
+
+        function setAgentActive(agent, active) {
+            const dot = document.getElementById(`dot${agent}`);
+            if (dot) {
+                if (active) {
+                    dot.classList.add('active');
+                } else {
+                    dot.classList.remove('active');
+                }
+            }
+        }
+
+        function showWaiting(text) {
+            const indicator = document.getElementById('waitingIndicator');
+            document.getElementById('waitingText').textContent = text || 'Agent 思考中...';
+            indicator.classList.add('active');
+            disableInput();
+        }
+
+        function hideWaiting() {
+            document.getElementById('waitingIndicator').classList.remove('active');
+        }
+
+        function showPhaseBanner(phase) {
+            const banner = document.getElementById('phaseBanner');
+            const icon = document.getElementById('phaseIcon');
+            const text = document.getElementById('phaseText');
+            
+            banner.className = 'phase-banner ' + phase;
+            
+            if (phase === 'direction_selection') {
+                icon.textContent = '🎯';
+                text.innerHTML = '<strong>请选择创意方向</strong>：输入格式如「方向1」或「方向1、2」';
+            } else {
+                icon.textContent = '💭';
+                text.innerHTML = '<strong>请选择</strong>：「满意」确认 / 输入修改意见 / 「重新生成」重来';
+            }
+            
+            banner.style.display = 'flex';
+        }
+
+        function hidePhaseBanner() {
+            document.getElementById('phaseBanner').style.display = 'none';
+        }
+
+        function enableInput() {
+            document.getElementById('messageInput').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('messageInput').focus();
+        }
+
+        function disableInput() {
+            document.getElementById('messageInput').disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+        }
+
+        function showOutline(outline) {
+            const container = document.getElementById('chatMessages');
+            const outlineDiv = document.createElement('div');
+            outlineDiv.className = 'outline-container';
+            outlineDiv.innerHTML = `
+                <div class="outline-title">✨ 故事大纲已生成</div>
+                <div class="outline-content">${formatContent(outline)}</div>
+            `;
+            container.appendChild(outlineDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatTime(timestamp) {
+            if (!timestamp) return '';
+            const d = new Date(timestamp);
+            return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        function formatDate(timestamp) {
+            if (!timestamp) return '';
+            const d = new Date(timestamp);
+            const now = new Date();
+            const diff = now - d;
+            
+            if (diff < 60000) return '刚刚';
+            if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+            if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+            
+            return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+        }
+    </script>
+</body>
+</html>
