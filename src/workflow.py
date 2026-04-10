@@ -293,9 +293,24 @@ class WorkflowEngine:
                 else:
                     direction_type = '方向'
                 
-                context_lines.append(f"\n=== 提示：用户选择的是【{direction_type}】 ===")
-                context_lines.append(f"\n编号：{direction_type}{direction}")
-                context_lines.append(f"\n【重要】请使用'【{direction_type}】'这个词来输出审核结果，不要使用其他词汇")
+                # 获取A的所有详细创意并传递给B
+                a_entries = [e for e in entries if e.get('agent') == 'A']
+                for entry in reversed(a_entries):
+                    content = entry.get('content', '')
+                    if '详细设计' in content or '主角设定' in content or '金手指设计' in content:
+                        context_lines.append(f"\n=== 提示：用户选择了 {len(direction_nums)} 个{direction_type} ===")
+                        context_lines.append(f"编号：{direction_type}{direction}")
+                        context_lines.append(f"\n【重要】请使用'【{direction_type}】'这个词来输出审核结果，不要使用其他词汇")
+                        context_lines.append(f"\n【重要】请分别对每个{direction_type}进行详细审核，输出格式参考：")
+                        context_lines.append(f"- {direction_type} {direction_nums[0]} 的审核")
+                        if len(direction_nums) > 1:
+                            context_lines.append(f"- {direction_type} {direction_nums[1]} 的审核")
+                        if len(direction_nums) > 2:
+                            context_lines.append(f"- ...")
+                        context_lines.append(f"\n【最重要】你必须审核用户选择的每一个{direction_type}，不得遗漏任何一个")
+                        context_lines.append(f"\n=== 完整的详细创意内容如下，请仔细阅读后逐个审核 ===")
+                        context_lines.append(f"\n{content}")
+                        break
         
         return '\n'.join(context_lines)
     
