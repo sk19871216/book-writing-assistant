@@ -95,30 +95,36 @@ def get_conversation(conv_id: int) -> Optional[Dict[str, Any]]:
         conn.close()
         return None
     
+    # 立即将 conv_row 转换为 dict，避免连接关闭后访问
+    conv_data = dict(conv_row)
+    
     cursor.execute(
         'SELECT * FROM entries WHERE conversation_id = ? ORDER BY timestamp',
         (conv_id,)
     )
-    entries = [dict(row) for row in cursor.fetchall()]
+    rows = cursor.fetchall()
+    entries = [dict(row) for row in rows] if rows else []
     
     cursor.execute(
         'SELECT * FROM user_selections WHERE conversation_id = ? ORDER BY round',
         (conv_id,)
     )
-    selections = [dict(row) for row in cursor.fetchall()]
+    rows = cursor.fetchall()
+    selections = [dict(row) for row in rows] if rows else []
     
     conn.close()
     
-    workflow_state = conv_row['workflow_state'] if 'workflow_state' in conv_row.keys() else 'direction_selection'
+    # 安全地获取 workflow_state
+    workflow_state = conv_data.get('workflow_state') or 'direction_selection'
 
     return {
-        'id': conv_row['id'],
-        'topic': conv_row['topic'],
-        'round': conv_row['round'],
-        'status': conv_row['status'],
+        'id': conv_data['id'],
+        'topic': conv_data['topic'],
+        'round': conv_data['round'],
+        'status': conv_data['status'],
         'workflow_state': workflow_state,
-        'created_at': conv_row['created_at'],
-        'updated_at': conv_row['updated_at'],
+        'created_at': conv_data['created_at'],
+        'updated_at': conv_data['updated_at'],
         'entries': entries,
         'user_selections': selections
     }
@@ -139,7 +145,7 @@ def list_conversations(limit: int = 20) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     
-    return [dict(row) for row in rows]
+    return [dict(row) for row in rows] if rows else []
 
 
 def append_entry(conversation_id: int, agent: str, round_num: int, content: str) -> int:
@@ -291,7 +297,7 @@ def get_all_entries(conv_id: int) -> List[Dict[str, Any]]:
     rows = cursor.fetchall()
     conn.close()
     
-    return [dict(row) for row in rows]
+    return [dict(row) for row in rows] if rows else []
 
 
 def get_workflow_state(conv_id: int) -> str:
@@ -301,10 +307,14 @@ def get_workflow_state(conv_id: int) -> str:
     
     cursor.execute('SELECT workflow_state FROM conversations WHERE id = ?', (conv_id,))
     row = cursor.fetchone()
-    conn.close()
     
-    if row and 'workflow_state' in row.keys():
-        return row['workflow_state']
+    if row:
+        # 立即将 row 转换为 dict，避免连接关闭后访问
+        row_data = dict(row)
+        conn.close()
+        return row_data.get('workflow_state') or 'direction_selection'
+    
+    conn.close()
     return 'direction_selection'
 
 

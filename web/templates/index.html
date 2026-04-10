@@ -1040,10 +1040,10 @@
             }
             
             if (type === 'awaiting_user_input') {
-                const { phase } = data.data;
+                const { phase, is_refinement } = data.data;
                 const state = data.data.state || phase || 'direction_selection';
                 isWaitingForUser = true;
-                showPhaseBanner(state);
+                showPhaseBanner(state, is_refinement);
                 hideWaiting();
                 enableInput();
                 showCancelButton();
@@ -1052,10 +1052,11 @@
             if (type === 'workflow_waiting') {
                 const { round } = data;
                 const phase = data.phase || data.state || 'direction_selection';
+                const is_refinement = data.is_refinement || false;
                 currentRound = round;
                 document.getElementById('roundInfo').textContent = `轮次: ${round}`;
                 isWaitingForUser = true;
-                showPhaseBanner(phase);
+                showPhaseBanner(phase, is_refinement);
                 hideWaiting();
                 enableInput();
                 showCancelButton();
@@ -1112,7 +1113,7 @@
             if (indicator) indicator.classList.remove('active');
         }
 
-        function showPhaseBanner(phase) {
+        function showPhaseBanner(phase, isRefinement = false) {
             const banner = document.getElementById('phaseBanner');
             const icon = document.getElementById('phaseIcon');
             const text = document.getElementById('phaseText');
@@ -1120,8 +1121,13 @@
             banner.className = 'phase-banner ' + phase;
 
             if (phase === 'direction_selection') {
-                icon.textContent = '🎯';
-                text.innerHTML = '<strong>请选择感兴趣的方向</strong>。示例：单选【方向2】、多选【方向2、3】';
+                if (isRefinement) {
+                    icon.textContent = '🎯';
+                    text.innerHTML = '<strong>请选择细化后的子方向</strong>。示例：单选【子方向2】、多选【子方向2、3】';
+                } else {
+                    icon.textContent = '🎯';
+                    text.innerHTML = '<strong>请选择感兴趣的方向</strong>。示例：单选【方向2】、多选【方向2、3】 / 或输入【细化方向X】深入探索';
+                }
             } else if (phase === 'detailed_ideas') {
                 icon.textContent = '📝';
                 text.innerHTML = '<strong>详细方案已生成</strong>：输入「让B审核」让审核者把关 / 输入修改意见继续调整 / 输入「满意」交给分析师';
@@ -1130,7 +1136,13 @@
                 text.innerHTML = '<strong>请选择</strong>：输入「让B审核」让审核者把关 / 输入修改意见继续调整 / 输入「满意」交给分析师';
             } else if (phase === 'feedback_after_review') {
                 icon.textContent = '✅';
-                text.innerHTML = '<strong>B 已审核完毕</strong>：输入「确认」按B的改 / 输入反馈综合B与你的意见再改 / 输入「满意」交给分析师';
+                text.innerHTML = '<strong>B 已审核完毕</strong>：输入「修改」按B的改 / 输入反馈综合B与你的意见再改 / 输入「满意」交给分析师';
+            } else if (phase === 'refining_after_review') {
+                icon.textContent = '🔄';
+                text.innerHTML = '<strong>正在根据审核意见修改详细创意...</strong>';
+            } else if (phase === 'direction_refinement') {
+                icon.textContent = '🔍';
+                text.innerHTML = '<strong>正在细化方向...</strong>';
             } else {
                 icon.textContent = '💭';
                 text.innerHTML = '<strong>请选择</strong>：输入「让B审核」让审核者把关 / 输入修改意见 / 输入「满意」确认';
